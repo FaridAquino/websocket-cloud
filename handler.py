@@ -239,13 +239,7 @@ def publishPedido(event, context):
 def pedidoFiltro(event, context):
     print(f"pedidoFiltro invocado. Evento: {event}")
     
-    connection_id = event['requestContext']['connectionId']
-    connections_table = dynamodb.Table(CONNECTIONS_TABLE)
-    conn_resp = connections_table.get_item(Key={'connectionId': connection_id})
-    
-    if 'Item' not in conn_resp:
-        return {'statusCode': 403, 'body': json.dumps('Conexión no autorizada. Reconecte.')}
-    
+    # Esta es una petición HTTP GET, no requiere verificación de conexión WebSocket
     try:
         # Obtener parámetros de query string para los filtros
         query_params = event.get('queryStringParameters', {}) or {}
@@ -300,25 +294,12 @@ def pedidoFiltro(event, context):
             response = pedidos_table.scan(**scan_kwargs)
             pedidos_filtrados.extend(response.get('Items', []))
         
-        # Convertir Decimals a floats para transmisión JSON
-        pedidos_for_transmission = convert_decimal_to_float(pedidos_filtrados)
+        # Convertir Decimals a floats para respuesta JSON
+        pedidos_for_response = convert_decimal_to_float(pedidos_filtrados)
         
-        message_payload = {
-            "action": "filtro_pedido_resultado",
-            "filtros_aplicados": {
-                "fecha_pedido": fecha_pedido,
-                "estado_pedido": estado_pedido,
-                "fecha_entrega": fecha_entrega
-            },
-            "pedidos": pedidos_for_transmission,
-            "total_encontrados": len(pedidos_filtrados),
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }
+        print(f"Pedidos filtrados encontrados: {len(pedidos_filtrados)}")
         
-        transmitir(event, message_payload)
-        
-        print(f"Pedidos filtrados enviados: {len(pedidos_filtrados)}")
-        
+        # Devolver resultados directamente en la respuesta HTTP (no transmitir por WebSocket)
         return {
             'statusCode': 200,
             'body': json.dumps({
@@ -328,7 +309,9 @@ def pedidoFiltro(event, context):
                     "fecha_pedido": fecha_pedido,
                     "estado_pedido": estado_pedido,
                     "fecha_entrega": fecha_entrega
-                }
+                },
+                "pedidos": pedidos_for_response,
+                "timestamp": datetime.now(timezone.utc).isoformat()
             })
         }
         
