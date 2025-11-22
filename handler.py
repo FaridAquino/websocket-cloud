@@ -18,6 +18,17 @@ def convert_floats_to_decimal(obj):
     elif isinstance(obj, float):
         return Decimal(str(obj))
     else:
+        return obj
+
+def convert_decimal_to_float(obj):
+    """Convierte recursivamente todos los Decimal a float para JSON serialization"""
+    if isinstance(obj, list):
+        return [convert_decimal_to_float(item) for item in obj]
+    elif isinstance(obj, dict):
+        return {key: convert_decimal_to_float(value) for key, value in obj.items()}
+    elif isinstance(obj, Decimal):
+        return float(obj)
+    else:
         return obj 
 
 def transmitir(event, message_payload_dict):
@@ -182,12 +193,6 @@ def publishPedido(event, context):
             
             pedido["elementos"].append(elemento_procesado)
         
-        message_payload = {
-            "action": "nuevo_pedido",
-            "pedido": pedido,
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }
-
         # Guardar pedido en DynamoDB (convertir floats a Decimal)
         try:        
             dbPedido = dynamodb.Table(PEDIDO_TABLE)
@@ -200,6 +205,14 @@ def publishPedido(event, context):
                 'statusCode': 500,
                 'body': json.dumps('Error guardando pedido en base de datos')
             }
+
+        # Crear payload para transmisión (convertir Decimal a float para JSON)
+        pedido_for_transmission = convert_decimal_to_float(pedido)
+        message_payload = {
+            "action": "nuevo_pedido",
+            "pedido": pedido_for_transmission,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
 
         # Transmitir pedido a TODAS las conexiones activas
         transmitir(event, message_payload)
@@ -287,6 +300,9 @@ def pedidoFiltro(event, context):
             response = pedidos_table.scan(**scan_kwargs)
             pedidos_filtrados.extend(response.get('Items', []))
         
+        # Convertir Decimals a floats para transmisión JSON
+        pedidos_for_transmission = convert_decimal_to_float(pedidos_filtrados)
+        
         message_payload = {
             "action": "filtro_pedido_resultado",
             "filtros_aplicados": {
@@ -294,7 +310,7 @@ def pedidoFiltro(event, context):
                 "estado_pedido": estado_pedido,
                 "fecha_entrega": fecha_entrega
             },
-            "pedidos": pedidos_filtrados,
+            "pedidos": pedidos_for_transmission,
             "total_encontrados": len(pedidos_filtrados),
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
