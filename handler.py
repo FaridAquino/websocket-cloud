@@ -3,10 +3,22 @@ import os
 import uuid
 import json
 from datetime import datetime, timezone
+from decimal import Decimal
 
 PEDIDO_TABLE = os.environ.get('PEDIDO_TABLE')
 CONNECTIONS_TABLE = os.environ.get('CONNECTIONS_TABLE')
-dynamodb = boto3.resource('dynamodb') 
+dynamodb = boto3.resource('dynamodb')
+
+def convert_floats_to_decimal(obj):
+    """Convierte recursivamente todos los floats a Decimal para DynamoDB"""
+    if isinstance(obj, list):
+        return [convert_floats_to_decimal(item) for item in obj]
+    elif isinstance(obj, dict):
+        return {key: convert_floats_to_decimal(value) for key, value in obj.items()}
+    elif isinstance(obj, float):
+        return Decimal(str(obj))
+    else:
+        return obj 
 
 def transmitir(event, message_payload_dict):
     try:
@@ -123,7 +135,7 @@ def publishPedido(event, context):
             "fecha_pedido": body.get('fecha_pedido'),
             "fecha_entrega": body.get('fecha_entrega'),
             "estado_pedido": body.get('estado_pedido'),
-            "multiplicador_de_puntos": body.get('multiplicador_de_puntos', 1.0),
+            "multiplicador_de_puntos": Decimal(str(body.get('multiplicador_de_puntos', 1.0))),
             "delivery": body.get('delivery', False),
             "beneficios": body.get('beneficios', []),
             "elementos": []
@@ -160,13 +172,13 @@ def publishPedido(event, context):
             
             elemento_procesado["productos"]["adicionales"] = productos.get('adicionales', [])
             
-            precio_base = elemento.get('precio_base_combo', 0)
-            porcentaje = elemento.get('porcentaje', 1.0)
-            extra_producto = elemento.get('extra_producto_modificado', 0)
+            precio_base = Decimal(str(elemento.get('precio_base_combo', 0)))
+            porcentaje = Decimal(str(elemento.get('porcentaje', 1.0)))
+            extra_producto = Decimal(str(elemento.get('extra_producto_modificado', 0)))
             elemento_procesado["precio"] = (precio_base * porcentaje) + extra_producto
             
-            puntos_base = elemento.get('puntos_base', 0)
-            elemento_procesado["puntos"] = puntos_base * pedido["multiplicador_de_puntos"]
+            puntos_base = Decimal(str(elemento.get('puntos_base', 0)))
+            elemento_procesado["puntos"] = puntos_base * Decimal(str(pedido["multiplicador_de_puntos"]))
             
             pedido["elementos"].append(elemento_procesado)
         
@@ -176,10 +188,11 @@ def publishPedido(event, context):
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
-        # Guardar pedido en DynamoDB
+        # Guardar pedido en DynamoDB (convertir floats a Decimal)
         try:        
             dbPedido = dynamodb.Table(PEDIDO_TABLE)
-            dbPedido.put_item(Item=pedido)
+            pedido_for_db = convert_floats_to_decimal(pedido)
+            dbPedido.put_item(Item=pedido_for_db)
             print(f"Pedido guardado exitosamente: tenant_id={pedido['tenant_id']}, uuid={pedido['uuid']}")
         except Exception as e:
             print(f"Error guardando pedido en DynamoDB: {e}")
