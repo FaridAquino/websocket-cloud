@@ -1,0 +1,84 @@
+org: faridaquino
+service: api-websocket
+
+provider:
+  name: aws
+  runtime: python3.12
+  timeout: 29
+  region: us-east-1
+  stage: dev
+  
+  iam:
+    role: arn:aws:iam::885475026169:role/LabRole
+  
+  httpApi:
+    cors: true
+
+  websocketsApiName: mi-api-websocket
+  websocketsApiRouteSelectionExpression: $request.body.action
+
+  environment:
+    PEDIDO_TABLE: ${self:custom.pedidoTable}
+    CONNECTIONS_TABLE: ${self:custom.connectionsTable}
+
+custom:
+  pedidoTable: Pedidos
+  connectionsTable: Connections
+
+functions:
+
+  publishPedido:
+    handler: handler.publishPedido
+    events:
+      - websocket:
+          route: PublishPedido
+
+  connectionHandler:
+    handler: handler.connection_manager 
+    events:
+      - websocket:
+          route: $connect
+      - websocket:
+          route: $disconnect
+
+  defaultHandler:
+    handler: handler.default_handler
+    events:
+      - websocket: $default
+
+  obtenerPedidoFiltro:
+    handler: handler.pedidoFiltro
+    events:
+      - httpApi:
+          path: /pedido
+          method: get
+
+resources:
+  Resources:
+    IncidentesTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:custom.pedidoTable}
+        AttributeDefinitions:
+          - AttributeName: tenant_id
+            AttributeType: S
+          - AttributeName: uuid
+            AttributeType: S
+        KeySchema:
+          - AttributeName: tenant_id
+            KeyType: HASH
+          - AttributeName: uuid
+            KeyType: RANGE
+        BillingMode: PAY_PER_REQUEST
+
+    ConnectionsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:custom.connectionsTable}
+        AttributeDefinitions:
+          - AttributeName: connectionId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: connectionId
+            KeyType: HASH
+        BillingMode: PAY_PER_REQUEST
