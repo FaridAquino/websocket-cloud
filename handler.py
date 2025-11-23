@@ -53,7 +53,7 @@ def transmitir(event, message_payload_dict):
 
     try:
         response = connections_table.scan(ProjectionExpression='connectionId, #r',
-                                          ExpressionAttributeNames={'#r': 'Role'})
+                                          ExpressionAttributeNames={'#r': 'role'})
         connections = response.get('Items', [])
     except Exception as e:
         print(f"[Error Transmitir] Fallo al escanear la tabla de conexiones: {e}")
@@ -66,7 +66,7 @@ def transmitir(event, message_payload_dict):
 
     for connection in connections:
         connection_id = connection['connectionId']
-        user_role = connection.get('Role', 'CLIENTE')  # Default a CLIENTE si no tiene rol
+        user_role = connection.get('role', 'CLIENTE')  # Default a CLIENTE si no tiene rol
         
         # Solo enviar si el rol es CHEF
         if user_role == 'CHEF':
