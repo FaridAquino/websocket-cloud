@@ -52,32 +52,40 @@ def transmitir(event, message_payload_dict):
         return
 
     try:
-        response = connections_table.scan(ProjectionExpression='connectionId')
+        response = connections_table.scan(ProjectionExpression='connectionId, #r',
+                                          ExpressionAttributeNames={'#r': 'Role'})
         connections = response.get('Items', [])
     except Exception as e:
         print(f"[Error Transmitir] Fallo al escanear la tabla de conexiones: {e}")
         return
 
-    print(f"Encontradas {len(connections)} conexiones para transmitir.")
+    print(f"Encontradas {len(connections)} conexiones para evaluar.")
     
     message_payload_str = json.dumps(message_payload_dict)
+    chefs_found = 0
 
-    # Enviar a TODAS las conexiones activas
     for connection in connections:
         connection_id = connection['connectionId']
+        user_role = connection.get('Role', 'CLIENTE')  # Default a CLIENTE si no tiene rol
         
-        try:
-            if (connection['role'] == 'CHEF'):
+        # Solo enviar si el rol es CHEF
+        if user_role == 'CHEF':
+            chefs_found += 1
+            try:
                 apigateway_client.post_to_connection(
-                ConnectionId=connection_id,
-                Data=message_payload_str.encode('utf-8')
+                    ConnectionId=connection_id,
+                    Data=message_payload_str.encode('utf-8')
                 )
-                print(f"[Info Transmitir] Mensaje enviado a {connection_id}")
-        except apigateway_client.exceptions.GoneException:
-            print(f"[Info Transmitir] Conexión muerta {connection_id}. Limpiando.")
-            connections_table.delete_item(Key={'connectionId': connection_id})
-        except Exception as e:
-            print(f"[Error Transmitir] No se pudo enviar a {connection_id}: {e}")
+                print(f"[Info Transmitir] Pedido enviado a chef: {connection_id}")
+            except apigateway_client.exceptions.GoneException:
+                print(f"[Info Transmitir] Conexión de chef muerta {connection_id}. Limpiando.")
+                connections_table.delete_item(Key={'connectionId': connection_id})
+            except Exception as e:
+                print(f"[Error Transmitir] No se pudo enviar a chef {connection_id}: {e}")
+        else:
+            print(f"[Info Transmitir] Saltando conexión {connection_id} - Rol: {user_role} (no es chef)")
+    
+    print(f"[Info Transmitir] Pedido transmitido a {chefs_found} chefs conectados.")
 
 def connection_manager(event, context):
     connection_id = event['requestContext']['connectionId']
