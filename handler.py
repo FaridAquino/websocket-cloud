@@ -67,11 +67,12 @@ def transmitir(event, message_payload_dict):
         connection_id = connection['connectionId']
         
         try:
-            apigateway_client.post_to_connection(
+            if (connection['role'] == 'CHEF'):
+                apigateway_client.post_to_connection(
                 ConnectionId=connection_id,
                 Data=message_payload_str.encode('utf-8')
-            )
-            print(f"[Info Transmitir] Mensaje enviado a {connection_id}")
+                )
+                print(f"[Info Transmitir] Mensaje enviado a {connection_id}")
         except apigateway_client.exceptions.GoneException:
             print(f"[Info Transmitir] Conexión muerta {connection_id}. Limpiando.")
             connections_table.delete_item(Key={'connectionId': connection_id})
@@ -81,6 +82,8 @@ def transmitir(event, message_payload_dict):
 def connection_manager(event, context):
     connection_id = event['requestContext']['connectionId']
     route_key = event['requestContext']['routeKey']
+
+    query_params = event.get('queryStringParameters', {}) or {}
 
     if not CONNECTIONS_TABLE:
         print("Error: CONNECTIONS_TABLE no está definida en las variables de entorno.")
@@ -93,7 +96,7 @@ def connection_manager(event, context):
             
             item = {
                 'connectionId': connection_id,
-                'Role': "CLIENTE",
+                'role': query_params.get('role', 'CLIENTE'),
                 'connectTime': datetime.now(timezone.utc).isoformat()
             }
 
