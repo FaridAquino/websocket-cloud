@@ -1,16 +1,17 @@
-import boto3
-import os
-import uuid
 import json
-from datetime import datetime, timezone
+import os
+import random
+import boto3
 from decimal import Decimal
+from datetime import datetime, timezone
+import mercadopago
+import uuid
 
 PEDIDO_TABLE = os.environ.get('PEDIDO_TABLE')
 CONNECTIONS_TABLE = os.environ.get('CONNECTIONS_TABLE')
 dynamodb = boto3.resource('dynamodb')
 
 def convert_floats_to_decimal(obj):
-    """Convierte recursivamente todos los floats a Decimal para DynamoDB"""
     if isinstance(obj, list):
         return [convert_floats_to_decimal(item) for item in obj]
     elif isinstance(obj, dict):
@@ -21,7 +22,6 @@ def convert_floats_to_decimal(obj):
         return obj
 
 def convert_decimal_to_float(obj):
-    """Convierte recursivamente todos los Decimal a float para JSON serialization"""
     if isinstance(obj, list):
         return [convert_decimal_to_float(item) for item in obj]
     elif isinstance(obj, dict):
@@ -52,8 +52,7 @@ def transmitir(event, message_payload_dict):
         return
 
     try:
-        response = connections_table.scan(ProjectionExpression='connectionId, #r',
-                                          ExpressionAttributeNames={'#r': 'role'})
+        response = connections_table.scan(ProjectionExpression='connectionId, #r',ExpressionAttributeNames={'#r': 'role'})
         connections = response.get('Items', [])
     except Exception as e:
         print(f"[Error Transmitir] Fallo al escanear la tabla de conexiones: {e}")
@@ -66,9 +65,8 @@ def transmitir(event, message_payload_dict):
 
     for connection in connections:
         connection_id = connection['connectionId']
-        user_role = connection.get('role', 'CLIENTE')  # Default a CLIENTE si no tiene rol
+        user_role = connection.get('role', 'CLIENTE')
         
-        # Solo enviar si el rol es CHEF
         if user_role == 'CHEF':
             chefs_found += 1
             try:
@@ -138,121 +136,10 @@ def default_handler(event, context):
         'body': json.dumps("Acción no reconocida.")
     }
 
-def publishPedido(event, context):
-    print(f"publishPedido invocado. Evento: {event}")
-    connection_id = event['requestContext']['connectionId']
-    connections_table = dynamodb.Table(CONNECTIONS_TABLE)
-
-    # Verificar conexión autorizada
-    conn_resp = connections_table.get_item(Key={'connectionId': connection_id})
-    if 'Item' not in conn_resp:
-        return {'statusCode': 403, 'body': json.dumps('Conexión no autorizada. Reconecte.')}
-    
-    try:
-        body = json.loads(event.get('body', '{}'))
-        
-        pedido = {
-            "tenant_id": body.get('tenant_id'),  # usuario - HASH key
-            "uuid": body.get('uuid', str(uuid.uuid4())),  # RANGE key - Generar UUID si no se proporciona
-            "fecha_pedido": body.get('fecha_pedido'),
-            "fecha_entrega": body.get('fecha_entrega'),
-            "estado_pedido": body.get('estado_pedido'),
-            "multiplicador_de_puntos": Decimal(str(body.get('multiplicador_de_puntos', 1.0))),
-            "delivery": body.get('delivery', False),
-            "beneficios": body.get('beneficios', []),
-            "elementos": []
-        }
-        
-        elementos = body.get('elementos', [])
-        for elemento in elementos:
-            elemento_procesado = {
-                "combo": elemento.get('combo', []),
-                "cantidad_combo": elemento.get('cantidad_combo', ""),
-                "productos": {
-                    "hamburguesa": [],
-                    "papas": [],
-                    "complementos": [],
-                    "adicionales": []
-                }
-            }
-            
-            productos = elemento.get('productos', {})
-            
-            hamburguesas = productos.get('hamburguesa', [])
-            for hamburguesa in hamburguesas:
-                hamburguesa_procesada = {
-                    "nombre": hamburguesa.get('nombre'),
-                    "ingredientes": hamburguesa.get('ingredientes', []),
-                    "tamaño": hamburguesa.get('tamaño'),
-                    "extra": hamburguesa.get('extra')
-                }
-                elemento_procesado["productos"]["hamburguesa"].append(hamburguesa_procesada)
-            
-            elemento_procesado["productos"]["papas"] = productos.get('papas', [])
-
-            elemento_procesado["productos"]["complementos"] = productos.get('complementos', [])
-            
-            elemento_procesado["productos"]["adicionales"] = productos.get('adicionales', [])
-            
-            precio_base = Decimal(str(elemento.get('precio_base_combo', 0)))
-            porcentaje = Decimal(str(elemento.get('porcentaje', 1.0)))
-            extra_producto = Decimal(str(elemento.get('extra_producto_modificado', 0)))
-            elemento_procesado["precio"] = (precio_base * porcentaje) + extra_producto
-            
-            puntos_base = Decimal(str(elemento.get('puntos_base', 0)))
-            elemento_procesado["puntos"] = puntos_base * Decimal(str(pedido["multiplicador_de_puntos"]))
-            
-            pedido["elementos"].append(elemento_procesado)
-        
-        # Guardar pedido en DynamoDB (convertir floats a Decimal)
-        try:        
-            dbPedido = dynamodb.Table(PEDIDO_TABLE)
-            pedido_for_db = convert_floats_to_decimal(pedido)
-            dbPedido.put_item(Item=pedido_for_db)
-            print(f"Pedido guardado exitosamente: tenant_id={pedido['tenant_id']}, uuid={pedido['uuid']}")
-        except Exception as e:
-            print(f"Error guardando pedido en DynamoDB: {e}")
-            return {
-                'statusCode': 500,
-                'body': json.dumps('Error guardando pedido en base de datos')
-            }
-
-        # Crear payload para transmisión (convertir Decimal a float para JSON)
-        pedido_for_transmission = convert_decimal_to_float(pedido)
-        message_payload = {
-            "action": "nuevo_pedido",
-            "pedido": pedido_for_transmission,
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }
-
-        # Transmitir pedido a TODAS las conexiones activas
-        transmitir(event, message_payload)
-        
-        return {
-            'statusCode': 200,
-            'body': json.dumps({
-                "message": "Pedido procesado y transmitido exitosamente",
-                "pedido_uuid": pedido["uuid"]
-            })
-        }
-
-    except json.JSONDecodeError:
-        return {'statusCode': 400, 'body': json.dumps('JSON inválido en el cuerpo de la solicitud')}
-    except KeyError as e:
-        return {'statusCode': 400, 'body': json.dumps(f'Campo requerido faltante: {str(e)}')}
-    except Exception as e:
-        print(f"Error procesando pedido: {e}")
-        return {
-            'statusCode': 500,
-            'body': json.dumps('Error interno del servidor procesando el pedido')
-        }
-
 def pedidoFiltro(event, context):
     print(f"pedidoFiltro invocado. Evento: {event}")
     
-    # Esta es una petición HTTP GET, no requiere verificación de conexión WebSocket
     try:
-        # Obtener parámetros de query string para los filtros
         query_params = event.get('queryStringParameters', {}) or {}
         
         # Parámetros de filtro
@@ -332,3 +219,247 @@ def pedidoFiltro(event, context):
             'statusCode': 500,
             'body': json.dumps(f'Error interno del servidor procesando el filtro: {str(e)}')
         }
+
+def pagarPedido(event, context):
+    
+    ACCESS_TOKEN = os.environ.get("ACCESS_TOKEN")
+    
+    if not ACCESS_TOKEN:
+        return {
+            'statusCode': 500,
+            'body': json.dumps("Error del Servidor: Falta configuración (ACCESS_TOKEN)")
+        }
+
+    sdk = mercadopago.SDK(ACCESS_TOKEN)
+    
+    try:
+        domain_name = event.get('requestContext', {}).get('domainName')
+        if domain_name:
+                webhook_url = f"https://{domain_name}/webhook"
+                print(f"Webhook URL detectada: {webhook_url}")
+
+        else:
+            return { "statusCode": 500,
+                    "body": json.dumps("Error del Servidor: No se pudo determinar el webhook_url") }
+
+        body_str = event.get('body', '{}')
+        body = json.loads(body_str) if isinstance(body_str, str) else body_str
+        cliente_email=body.get("cliente_email","test@example.com")
+
+        print(f"Payload del Pedido: {json.dumps(body)}")
+
+        # 3. LÓGICA DE CÁLCULO DE PRECIO
+        total_a_cobrar = 0.0
+        items_mp = []
+        
+        elementos = body.get("elementos", [])
+
+        if not elementos:
+            return {
+                'statusCode': 400,
+                'body': json.dumps("Error: No se proporcionaron elementos en el pedido.")
+            }
+        
+        for item in elementos:
+            precio = float(item.get("precio"))
+            cantidad = int(item.get("cantidad_combo"))
+            total_a_cobrar += precio * cantidad
+            
+            nombre_combo = item.get("combo", ["Combo"])[0]
+            items_mp.append({
+                "id": str(random.randint(1000, 9999)),
+                "title": nombre_combo,
+                "description": "Pedido de combo desde aplicación",
+                "picture_url": body.get("imagen_combo_url", "https://images.wondershare.com/repairit/article/error-image-error-loading-2.jpg"),
+                "quantity": cantidad,
+                "currency_id": "PEN",
+                "unit_price": precio
+            })
+
+        if total_a_cobrar==0:
+            return {
+                'statusCode': 400,
+                'body': json.dumps("Error: El total a cobrar no puede ser cero.")
+            }
+            
+        print(f"Total a Cobrar: S/. {total_a_cobrar}")
+
+        # 4. PREPARAR REFERENCIA EXTERNA (CRÍTICO PARA EL WEBHOOK)
+        # Enviamos un JSON string con los IDs necesarios para ubicar el pedido en DynamoDB
+        tenant_id = body.get("tenant_id", "sin_tenant")
+        uuid_val = uuid.uuid4()
+        
+        ref_data = {
+            "tenant_id": tenant_id,
+            "uuid": str(uuid_val)
+        }
+        external_ref_json = json.dumps(ref_data)
+
+        # 5. PREPARAR DATOS MP
+        back_urls = {
+            "success": "https://www.google.com/search?q=pago_exitoso",
+            "failure": "https://www.google.com/search?q=pago_fallido",
+            "pending": "https://www.google.com/search?q=pago_pendiente"
+        }
+        
+        
+        client_email=body.get("cliente_email")
+
+        preference_data = {
+            "items": items_mp,
+            "payer": {
+                "email": client_email,
+            },
+            "external_reference": external_ref_json,
+            "payment_methods": {
+                "excluded_payment_methods": [{"id": "visa"}],
+                "installments": 6
+            },
+            "back_urls": back_urls,
+            "auto_return": "approved",
+            "notification_url": webhook_url, 
+        }
+
+        preference_response = sdk.preference().create(preference_data)
+        mp_response = preference_response["response"]
+        
+        if preference_response["status"] not in [200, 201]:
+            return {
+                'statusCode': 400,
+                'body': json.dumps(mp_response)
+            }
+
+        print(f"Preferencia creada en MP: {json.dumps(mp_response)}")
+
+        sandbox_init_point = mp_response['sandbox_init_point']
+        preference_id = mp_response['id']
+
+        if PEDIDO_TABLE:
+            try:
+                table = dynamodb.Table(PEDIDO_TABLE)
+                item_db = json.loads(json.dumps(body), parse_float=Decimal)
+                
+                item_db["estado_pedido"] = "PENDIENTE_PAGO"
+                item_db["preference_id"] = preference_id
+                item_db["fecha_creacion"] = datetime.now(timezone.utc).isoformat()
+                item_db["uuid"]= str(uuid_val)
+
+                table.put_item(Item=item_db)
+                print(f"Pedido guardado en DynamoDB (PENDIENTE_PAGO)")
+            except Exception as e:
+                print(f"Error guardando en DynamoDB: {str(e)}")
+
+        return {
+            'statusCode': 200,
+            'headers': {'Access-Control-Allow-Origin': '*'},
+            'body': json.dumps({
+                "message": "Link generado",
+                "sandbox_init_point": sandbox_init_point,
+                "preference_id": preference_id
+            })
+        }
+
+    except Exception as e:
+        print(f"Error Crítico: {str(e)}")
+        return {
+            'statusCode': 500,
+            'body': json.dumps(f"Error interno: {str(e)}")
+        }
+
+def receiveWebhook(event, context):
+    print(f"[receiveWebhook] Evento recibido: {json.dumps(event)}")
+
+    ACCESS_TOKEN = os.environ.get("ACCESS_TOKEN")
+    SQS_QUEUE_URL = os.environ.get("SQS_QUEUE_URL")
+
+    if not ACCESS_TOKEN:
+        print("[Error] Falta configuración ACCESS_TOKEN")
+        return {'statusCode': 500, 'body': "Error de configuración"}
+
+    sdk = mercadopago.SDK(ACCESS_TOKEN)
+    sqs = boto3.client('sqs')
+    
+    try:
+        body = {}
+        if 'body' in event and event['body']:
+            body_str = event['body']
+            body = json.loads(body_str) if isinstance(body_str, str) else body_str
+
+        payment_id = body.get("data", {}).get("id")
+        topic = body.get("type")
+
+        if not payment_id and event.get("queryStringParameters"):
+            qs = event["queryStringParameters"]
+            payment_id = qs.get("data.id") or qs.get("id")
+            topic = qs.get("type") or qs.get("topic")
+
+        if topic != "payment" and topic != "payment_created": 
+            if not payment_id:
+                return {'statusCode': 200, 'body': 'Ignored/OK'}
+
+        print(f"Verificando pago ID en MP: {payment_id}")
+
+        payment_info = sdk.payment().get(payment_id)
+        
+        if payment_info["status"] != 200:
+            print(f"[Error MP API] Status: {payment_info['status']}")
+            return {'statusCode': 200, 'body': 'Error consultando MP'}
+
+        payment_data = payment_info["response"]
+        status = payment_data["status"]
+        external_ref_raw = payment_data.get("external_reference")
+
+        print(f"Estado del pago: {status}")
+
+        if status == "approved":
+            try:
+                keys = json.loads(external_ref_raw)
+                tenant_id = keys.get("tenant_id")
+                uuid_pedido = keys.get("uuid")
+            except Exception:
+                print(f"[Error] external_reference inválida: {external_ref_raw}")
+                return {'statusCode': 200, 'body': 'Bad Reference'}
+
+            if PEDIDO_TABLE and tenant_id and uuid_pedido:
+                table = dynamodb.Table(PEDIDO_TABLE)
+                
+                try:
+                    response = table.update_item(
+                        Key={
+                            'tenant_id': tenant_id,
+                            'uuid': uuid_pedido
+                        },
+                        UpdateExpression="set estado_pedido=:s",
+                        ExpressionAttributeValues={
+                            ':s': 'PAGADO',
+                        },
+                        ReturnValues="ALL_NEW"
+                    )
+                    pedido_actualizado = response.get('Attributes')
+                    print(f"DynamoDB actualizado: Pedido {uuid_pedido} -> PAGADO")
+
+                    if SQS_QUEUE_URL and pedido_actualizado:
+                        def decimal_default(obj):
+                            if isinstance(obj, Decimal): return float(obj)
+                            raise TypeError
+
+                        sqs.send_message(
+                            QueueUrl=SQS_QUEUE_URL,
+                            MessageBody=json.dumps(pedido_actualizado, default=decimal_default),
+                            # En colas FIFO, MessageGroupId es obligatorio.
+                            # Usamos tenant_id o un string fijo si todos los consumidores son iguales.
+                            MessageGroupId="pedidos_pagados", 
+                            # DeduplicationId evita duplicados si el webhook se dispara 2 veces
+                            MessageDeduplicationId=f"{uuid_pedido}_{payment_id}" 
+                        )
+                        print(f"Mensaje enviado a SQS: {SQS_QUEUE_URL}")
+
+                except Exception as e:
+                    print(f"[Error Crítico DB/SQS] {str(e)}")
+                    return {'statusCode': 500, 'body': 'Error en subir en DB/SQS'}
+                    
+        return {'statusCode': 200, 'body': 'Webhook procesado'}
+
+    except Exception as e:
+        print(f"[Error Handler Webhook] {str(e)}")
+        return {'statusCode': 200, 'body': 'Error manejado'}

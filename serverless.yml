@@ -20,13 +20,15 @@ provider:
   environment:
     PEDIDO_TABLE: ${self:custom.pedidoTable}
     CONNECTIONS_TABLE: ${self:custom.connectionsTable}
+    ACCESS_TOKEN: AQUIMERCADOTOKEN
+    # Esto inyectará la URL de la cola creada abajo en las variables de entorno
+    SQS_QUEUE_URL: { Ref: YAPAGADOSQueue }
 
 custom:
   pedidoTable: Pedidos
   connectionsTable: Connections
 
 functions:
-
   publishPedido:
     handler: handler.publishPedido
     events:
@@ -52,6 +54,20 @@ functions:
       - httpApi:
           path: /pedido
           method: get
+
+  pagarPedido:
+    handler: handler.pagarPedido
+    events:
+      - httpApi:
+          path: /pagar
+          method: post
+
+  receiveWebhook:
+    handler: handler.receiveWebhook
+    events:
+      - httpApi:
+          path: /webhook
+          method: post
 
 resources:
   Resources:
@@ -82,3 +98,11 @@ resources:
           - AttributeName: connectionId
             KeyType: HASH
         BillingMode: PAY_PER_REQUEST
+
+    YAPAGADOSQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: YAPAGADOS.fifo
+        FifoQueue: true
+        ContentBasedDeduplication: true
+        VisibilityTimeout: 60
