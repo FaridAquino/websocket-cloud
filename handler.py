@@ -405,17 +405,16 @@ def obtenerPedidosPorEmail(event, context):
     print(f"obtenerPedidosPorEmail invocado. Evento: {event}")
     
     try:
-        # Obtener el body del request
-        body_str = event.get('body', '{}')
-        body = json.loads(body_str) if isinstance(body_str, str) else body_str
+        # Obtener parámetros de query string
+        query_params = event.get('queryStringParameters', {}) or {}
         
-        cliente_email = body.get('cliente_email')
+        cliente_email = query_params.get('cliente_email')
         
         if not cliente_email:
             return {
                 'statusCode': 400,
                 'headers': {'Access-Control-Allow-Origin': '*'},
-                'body': json.dumps({'error': 'cliente_email es requerido'})
+                'body': json.dumps({'error': 'cliente_email es requerido en query parameters'})
             }
         
         # Buscar pedidos por cliente_email
@@ -466,18 +465,17 @@ def obtenerPedidoPorId(event, context):
     print(f"obtenerPedidoPorId invocado. Evento: {event}")
     
     try:
-        # Obtener el body del request
-        body_str = event.get('body', '{}')
-        body = json.loads(body_str) if isinstance(body_str, str) else body_str
+        # Obtener parámetros de query string
+        query_params = event.get('queryStringParameters', {}) or {}
         
-        tenant_id = body.get('tenant_id')
-        uuid_pedido = body.get('uuid')
+        tenant_id = query_params.get('tenant_id')
+        uuid_pedido = query_params.get('uuid')
         
         if not tenant_id or not uuid_pedido:
             return {
                 'statusCode': 400,
                 'headers': {'Access-Control-Allow-Origin': '*'},
-                'body': json.dumps({'error': 'tenant_id y uuid son requeridos'})
+                'body': json.dumps({'error': 'tenant_id y uuid son requeridos en query parameters'})
             }
         
         # Buscar pedido por clave primaria
