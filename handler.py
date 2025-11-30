@@ -233,18 +233,22 @@ def pagarPedido(event, context):
     sdk = mercadopago.SDK(ACCESS_TOKEN)
     
     try:
-        domain_name = event.get('requestContext', {}).get('domainName')
-        if domain_name:
-                webhook_url = f"https://{domain_name}/webhook"
-                print(f"Webhook URL detectada: {webhook_url}")
+        rc = event.get('requestContext', {})
+        domain_name = rc.get('domainName')
+        stage = rc.get('stage')
 
+        if not domain_name:
+            return {"statusCode": 500, "body": "Error: No domainName"}
+
+        if stage == '$default':
+            webhook_url = f"https://{domain_name}/webhook"
         else:
-            return { "statusCode": 500,
-                    "body": json.dumps("Error del Servidor: No se pudo determinar el webhook_url") }
+            webhook_url = f"https://{domain_name}/{stage}/webhook"
+            
+        print(f"Webhook URL generada: {webhook_url}")
 
         body_str = event.get('body', '{}')
         body = json.loads(body_str) if isinstance(body_str, str) else body_str
-        cliente_email=body.get("cliente_email","test@example.com")
 
         print(f"Payload del Pedido: {json.dumps(body)}")
 
