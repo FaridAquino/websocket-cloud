@@ -88,17 +88,9 @@ functions:
 
   generarRecibo:
     handler: lambda_generar_recibo.lambda_handler
-    events:
-      - sns:
-          arn:
-            Ref: PedidosPagadosTopic
 
   enviarEmail:
     handler: lambda_enviar_email.lambda_handler
-    events:
-      - sns:
-          arn:
-            Ref: PedidosPagadosTopic
 
 resources:
   Resources:
@@ -154,3 +146,41 @@ resources:
           BlockPublicPolicy: true
           IgnorePublicAcls: true
           RestrictPublicBuckets: true
+
+    GenerarReciboSubscription:
+      Type: AWS::SNS::Subscription
+      Properties:
+        TopicArn:
+          Ref: PedidosPagadosTopic
+        Protocol: lambda
+        Endpoint:
+          Fn::GetAtt: [GenerarReciboLambdaFunction, Arn]
+
+    EnviarEmailSubscription:
+      Type: AWS::SNS::Subscription
+      Properties:
+        TopicArn:
+          Ref: PedidosPagadosTopic
+        Protocol: lambda
+        Endpoint:
+          Fn::GetAtt: [EnviarEmailLambdaFunction, Arn]
+
+    GenerarReciboLambdaPermission:
+      Type: AWS::Lambda::Permission
+      Properties:
+        FunctionName:
+          Ref: GenerarReciboLambdaFunction
+        Action: lambda:InvokeFunction
+        Principal: sns.amazonaws.com
+        SourceArn:
+          Ref: PedidosPagadosTopic
+
+    EnviarEmailLambdaPermission:
+      Type: AWS::Lambda::Permission
+      Properties:
+        FunctionName:
+          Ref: EnviarEmailLambdaFunction
+        Action: lambda:InvokeFunction
+        Principal: sns.amazonaws.com
+        SourceArn:
+          Ref: PedidosPagadosTopic
