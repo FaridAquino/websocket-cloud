@@ -405,14 +405,12 @@ def receiveWebhook(event, context):
     print(f"[receiveWebhook] Evento recibido: {json.dumps(event)}")
 
     ACCESS_TOKEN = os.environ.get("ACCESS_TOKEN")
-    SQS_QUEUE_URL = os.environ.get("SQS_QUEUE_URL")
 
     if not ACCESS_TOKEN:
         print("[Error] Falta configuración ACCESS_TOKEN")
         return {'statusCode': 500, 'body': "Error de configuración"}
 
     sdk = mercadopago.SDK(ACCESS_TOKEN)
-    sqs = boto3.client('sqs')
     
     try:
         body = {}
@@ -467,35 +465,13 @@ def receiveWebhook(event, context):
                         UpdateExpression="set estado_pedido=:s",
                         ExpressionAttributeValues={
                             ':s': 'PAGADO',
-                        },
-                        ReturnValues="ALL_NEW"
+                        }
                     )
-                    pedido_actualizado = response.get('Attributes')
-                    dataEnviarSqs={
-                        "tenant_id": pedido_actualizado.get("tenant_id"),
-                        "uuid": pedido_actualizado.get("uuid"),
-                    }
                     print(f"DynamoDB actualizado: Pedido {uuid_pedido} -> PAGADO")
 
-                    if SQS_QUEUE_URL and dataEnviarSqs:
-                        def decimal_default(obj):
-                            if isinstance(obj, Decimal): return float(obj)
-                            raise TypeError
-
-                        sqs.send_message(
-                            QueueUrl=SQS_QUEUE_URL,
-                            MessageBody=json.dumps(dataEnviarSqs, default=decimal_default),
-                            # En colas FIFO, MessageGroupId es obligatorio.
-                            # Usamos tenant_id o un string fijo si todos los consumidores son iguales.
-                            MessageGroupId="pedidos_pagados", 
-                            # DeduplicationId evita duplicados si el webhook se dispara 2 veces
-                            MessageDeduplicationId=f"{uuid_pedido}_{payment_id}" 
-                        )
-                        print(f"Mensaje enviado a SQS: {SQS_QUEUE_URL}")
-
                 except Exception as e:
-                    print(f"[Error Crítico DB/SQS] {str(e)}")
-                    return {'statusCode': 500, 'body': 'Error en subir en DB/SQS'}
+                    print(f"[Error Crítico DB] {str(e)}")
+                    return {'statusCode': 500, 'body': 'Error actualizando DB'}
                     
         return {'statusCode': 200, 'body': 'Webhook procesado'}
 
