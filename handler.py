@@ -291,7 +291,7 @@ def pagarPedido(event, context):
         # 4. PREPARAR REFERENCIA EXTERNA (CRÍTICO PARA EL WEBHOOK)
         # Enviamos un JSON string con los IDs necesarios para ubicar el pedido en DynamoDB
         tenant_id = body.get("tenant_id", "sin_tenant")
-        uuid_val = uuid.uuid4()
+        uuid_val = body.get("uuid")
         
         ref_data = {
             "tenant_id": tenant_id,
@@ -341,17 +341,48 @@ def pagarPedido(event, context):
         if PEDIDO_TABLE:
             try:
                 table = dynamodb.Table(PEDIDO_TABLE)
-                item_db = json.loads(json.dumps(body), parse_float=Decimal)
                 
-                item_db["estado_pedido"] = "PENDIENTE_PAGO"
-                item_db["preference_id"] = preference_id
-                item_db["fecha_creacion"] = datetime.now(timezone.utc).isoformat()
-                item_db["uuid"]= str(uuid_val)
+                # Validar si ya existe el pedido con el mismo tenant_id y uuid
+                try:
+                    existing_item = table.get_item(
+                        Key={
+                            'tenant_id': tenant_id,
+                            'uuid': str(uuid_val)
+                        }
+                    )
+                    
+                    if 'Item' in existing_item:
+                        print(f"[Warning] Pedido ya existe: tenant_id={tenant_id}, uuid={str(uuid_val)}")
+                        # Actualizar solo el preference_id y fecha si ya existe
+                        table.update_item(
+                            Key={
+                                'tenant_id': tenant_id,
+                                'uuid': str(uuid_val)
+                            },
+                            UpdateExpression="set preference_id = :pref_id, fecha_creacion = :fecha",
+                            ExpressionAttributeValues={
+                                ':pref_id': preference_id,
+                                ':fecha': datetime.now(timezone.utc).isoformat()
+                            }
+                        )
+                        print(f"Pedido actualizado con nueva preferencia: {preference_id}")
+                    else:
+                        # No existe, crear nuevo item
+                        item_db = json.loads(json.dumps(body), parse_float=Decimal)
+                        
+                        item_db["estado_pedido"] = "PENDIENTE_PAGO"
+                        item_db["preference_id"] = preference_id
+                        item_db["fecha_creacion"] = datetime.now(timezone.utc).isoformat()
+                        item_db["uuid"] = str(uuid_val)
 
-                table.put_item(Item=item_db)
-                print(f"Pedido guardado en DynamoDB (PENDIENTE_PAGO)")
+                        table.put_item(Item=item_db)
+                        print(f"Pedido guardado en DynamoDB (PENDIENTE_PAGO): {str(uuid_val)}")
+                        
+                except Exception as db_error:
+                    print(f"Error en operación DynamoDB: {str(db_error)}")
+                    
             except Exception as e:
-                print(f"Error guardando en DynamoDB: {str(e)}")
+                print(f"Error general guardando en DynamoDB: {str(e)}")
 
         return {
             'statusCode': 200,
@@ -440,16 +471,20 @@ def receiveWebhook(event, context):
                         ReturnValues="ALL_NEW"
                     )
                     pedido_actualizado = response.get('Attributes')
+                    dataEnviarSqs={
+                        "tenant_id": pedido_actualizado.get("tenant_id"),
+                        "uuid": pedido_actualizado.get("uuid"),
+                    }
                     print(f"DynamoDB actualizado: Pedido {uuid_pedido} -> PAGADO")
 
-                    if SQS_QUEUE_URL and pedido_actualizado:
+                    if SQS_QUEUE_URL and dataEnviarSqs:
                         def decimal_default(obj):
                             if isinstance(obj, Decimal): return float(obj)
                             raise TypeError
 
                         sqs.send_message(
                             QueueUrl=SQS_QUEUE_URL,
-                            MessageBody=json.dumps(pedido_actualizado, default=decimal_default),
+                            MessageBody=json.dumps(dataEnviarSqs, default=decimal_default),
                             # En colas FIFO, MessageGroupId es obligatorio.
                             # Usamos tenant_id o un string fijo si todos los consumidores son iguales.
                             MessageGroupId="pedidos_pagados", 
