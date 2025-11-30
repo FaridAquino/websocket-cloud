@@ -90,13 +90,13 @@ functions:
     handler: lambda_generar_recibo.lambda_handler
     events:
       - sns:
-          arn: { Ref: PedidosPagadosTopic }
+          topicName: pedidos-pagados-${self:provider.stage}
 
   enviarEmail:
     handler: lambda_enviar_email.lambda_handler
     events:
       - sns:
-          arn: { Ref: PedidosPagadosTopic }
+          topicName: pedidos-pagados-${self:provider.stage}
 
 resources:
   Resources:
@@ -139,7 +139,6 @@ resources:
     PedidosPagadosTopic:
       Type: AWS::SNS::Topic
       Properties:
-        TopicName: pedidos-pagados-${self:provider.stage}
         DisplayName: "Notificaciones de Pedidos Pagados"
 
     RecibosBucket:
