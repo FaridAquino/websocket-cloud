@@ -86,6 +86,20 @@ functions:
           path: /webhook
           method: post
 
+  obtenerPedidosPorEmail:
+    handler: handler.obtenerPedidosPorEmail
+    events:
+      - httpApi:
+          path: /pedidos/email
+          method: get
+
+  obtenerPedidoPorId:
+    handler: handler.obtenerPedidoPorId
+    events:
+      - httpApi:
+          path: /pedidos/id
+          method: get
+
   generarRecibo:
     handler: lambda_generar_recibo.lambda_handler
 

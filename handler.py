@@ -401,6 +401,133 @@ def pagarPedido(event, context):
             'body': json.dumps(f"Error interno: {str(e)}")
         }
 
+def obtenerPedidosPorEmail(event, context):
+    print(f"obtenerPedidosPorEmail invocado. Evento: {event}")
+    
+    try:
+        # Obtener el body del request
+        body_str = event.get('body', '{}')
+        body = json.loads(body_str) if isinstance(body_str, str) else body_str
+        
+        cliente_email = body.get('cliente_email')
+        
+        if not cliente_email:
+            return {
+                'statusCode': 400,
+                'headers': {'Access-Control-Allow-Origin': '*'},
+                'body': json.dumps({'error': 'cliente_email es requerido'})
+            }
+        
+        # Buscar pedidos por cliente_email
+        pedidos_table = dynamodb.Table(PEDIDO_TABLE)
+        
+        response = pedidos_table.scan(
+            FilterExpression='cliente_email = :email',
+            ExpressionAttributeValues={':email': cliente_email}
+        )
+        
+        pedidos_encontrados = response.get('Items', [])
+        
+        # Continuar escaneando si hay más elementos
+        while 'LastEvaluatedKey' in response:
+            response = pedidos_table.scan(
+                FilterExpression='cliente_email = :email',
+                ExpressionAttributeValues={':email': cliente_email},
+                ExclusiveStartKey=response['LastEvaluatedKey']
+            )
+            pedidos_encontrados.extend(response.get('Items', []))
+        
+        # Convertir Decimals a floats para respuesta JSON
+        pedidos_for_response = convert_decimal_to_float(pedidos_encontrados)
+        
+        print(f"Pedidos encontrados para {cliente_email}: {len(pedidos_encontrados)}")
+        
+        return {
+            'statusCode': 200,
+            'headers': {'Access-Control-Allow-Origin': '*'},
+            'body': json.dumps({
+                "message": "Pedidos obtenidos exitosamente",
+                "cliente_email": cliente_email,
+                "total_pedidos": len(pedidos_encontrados),
+                "pedidos": pedidos_for_response,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            })
+        }
+        
+    except Exception as e:
+        print(f"Error obteniendo pedidos por email: {e}")
+        return {
+            'statusCode': 500,
+            'headers': {'Access-Control-Allow-Origin': '*'},
+            'body': json.dumps({'error': f'Error interno del servidor: {str(e)}'})
+        }
+
+def obtenerPedidoPorId(event, context):
+    print(f"obtenerPedidoPorId invocado. Evento: {event}")
+    
+    try:
+        # Obtener el body del request
+        body_str = event.get('body', '{}')
+        body = json.loads(body_str) if isinstance(body_str, str) else body_str
+        
+        tenant_id = body.get('tenant_id')
+        uuid_pedido = body.get('uuid')
+        
+        if not tenant_id or not uuid_pedido:
+            return {
+                'statusCode': 400,
+                'headers': {'Access-Control-Allow-Origin': '*'},
+                'body': json.dumps({'error': 'tenant_id y uuid son requeridos'})
+            }
+        
+        # Buscar pedido por clave primaria
+        pedidos_table = dynamodb.Table(PEDIDO_TABLE)
+        
+        response = pedidos_table.get_item(
+            Key={
+                'tenant_id': tenant_id,
+                'uuid': uuid_pedido
+            }
+        )
+        
+        if 'Item' not in response:
+            return {
+                'statusCode': 404,
+                'headers': {'Access-Control-Allow-Origin': '*'},
+                'body': json.dumps({
+                    'error': 'Pedido no encontrado',
+                    'tenant_id': tenant_id,
+                    'uuid': uuid_pedido
+                })
+            }
+        
+        pedido = response['Item']
+        
+        # Convertir Decimals a floats para respuesta JSON
+        pedido_for_response = convert_decimal_to_float(pedido)
+        
+        print(f"Pedido encontrado: {tenant_id}/{uuid_pedido}")
+        
+        return {
+            'statusCode': 200,
+            'headers': {'Access-Control-Allow-Origin': '*'},
+            'body': json.dumps({
+                "message": "Pedido obtenido exitosamente",
+                "tenant_id": tenant_id,
+                "uuid": uuid_pedido,
+                "pedido": pedido_for_response,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            })
+        }
+        
+    except Exception as e:
+        print(f"Error obteniendo pedido por ID: {e}")
+        return {
+            'statusCode': 500,
+            'headers': {'Access-Control-Allow-Origin': '*'},
+            'body': json.dumps({'error': f'Error interno del servidor: {str(e)}'})
+        }
+
 def receiveWebhook(event, context):
     print(f"[receiveWebhook] Evento recibido: {json.dumps(event)}")
 
