@@ -23,6 +23,12 @@ provider:
     ACCESS_TOKEN: AQUIMERCADOTOKEN
     # Esto inyectará la URL de la cola creada abajo en las variables de entorno
     SQS_QUEUE_URL: { Ref: YAPAGADOSQueue }
+    # SNS Topic ARN para notificaciones de pedidos pagados
+    SNS_TOPIC_ARN: { Ref: PedidosPagadosTopic }
+    # S3 Bucket para almacenar recibos
+    S3_BUCKET: ${self:custom.s3Bucket}
+    GMAIL_USER: ""
+    GMAIL_PASSWORD: "" 
 
 package:
   patterns:
@@ -37,6 +43,7 @@ package:
 custom:
   pedidoTable: Pedidos
   connectionsTable: Connections
+  s3Bucket: recibos-bembos-${self:provider.stage}
 
 functions:
   publishPedido:
@@ -79,6 +86,18 @@ functions:
           path: /webhook
           method: post
 
+  generarRecibo:
+    handler: lambda_generar_recibo.lambda_handler
+    events:
+      - sns:
+          arn: { Ref: PedidosPagadosTopic }
+
+  enviarEmail:
+    handler: lambda_enviar_email.lambda_handler
+    events:
+      - sns:
+          arn: { Ref: PedidosPagadosTopic }
+
 resources:
   Resources:
     IncidentesTable:
@@ -116,3 +135,21 @@ resources:
         FifoQueue: true
         ContentBasedDeduplication: true
         VisibilityTimeout: 60
+
+    PedidosPagadosTopic:
+      Type: AWS::SNS::Topic
+      Properties:
+        TopicName: pedidos-pagados-${self:provider.stage}
+        DisplayName: "Notificaciones de Pedidos Pagados"
+
+    RecibosBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: ${self:custom.s3Bucket}
+        VersioningConfiguration:
+          Status: Enabled
+        PublicAccessBlockConfiguration:
+          BlockPublicAcls: true
+          BlockPublicPolicy: true
+          IgnorePublicAcls: true
+          RestrictPublicBuckets: true

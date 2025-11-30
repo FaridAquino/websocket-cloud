@@ -405,12 +405,14 @@ def receiveWebhook(event, context):
     print(f"[receiveWebhook] Evento recibido: {json.dumps(event)}")
 
     ACCESS_TOKEN = os.environ.get("ACCESS_TOKEN")
+    SNS_TOPIC_ARN = os.environ.get("SNS_TOPIC_ARN")
 
     if not ACCESS_TOKEN:
         print("[Error] Falta configuración ACCESS_TOKEN")
         return {'statusCode': 500, 'body': "Error de configuración"}
 
     sdk = mercadopago.SDK(ACCESS_TOKEN)
+    sns = boto3.client('sns')
     
     try:
         body = {}
@@ -465,9 +467,35 @@ def receiveWebhook(event, context):
                         UpdateExpression="set estado_pedido=:s",
                         ExpressionAttributeValues={
                             ':s': 'PAGADO',
-                        }
+                        },
+                        ReturnValues="ALL_NEW"
                     )
                     print(f"DynamoDB actualizado: Pedido {uuid_pedido} -> PAGADO")
+                    
+                    # Obtener datos del pedido actualizado
+                    pedido_actualizado = response.get('Attributes', {})
+                    cliente_email = pedido_actualizado.get('cliente_email')
+                    cliente_nombre = pedido_actualizado.get('cliente_nombre')
+                    
+                    # Enviar notificación a SNS para generar recibo y enviar email
+                    if SNS_TOPIC_ARN and cliente_email:
+                        sns_message = {
+                            'tenant_id': tenant_id,
+                            'uuid': uuid_pedido,
+                            'cliente_email': cliente_email,
+                            'cliente_nombre': cliente_nombre or 'Cliente',
+                            'payment_id': payment_id,
+                            'evento': 'pedido_pagado'
+                        }
+                        
+                        sns.publish(
+                            TopicArn=SNS_TOPIC_ARN,
+                            Message=json.dumps(sns_message),
+                            Subject=f'Pedido Pagado - {uuid_pedido}'
+                        )
+                        print(f"Notificación enviada a SNS para pedido: {uuid_pedido}")
+                    else:
+                        print(f"[Warning] No se pudo enviar a SNS - SNS_TOPIC_ARN: {SNS_TOPIC_ARN}, cliente_email: {cliente_email}")
 
                 except Exception as e:
                     print(f"[Error Crítico DB] {str(e)}")
