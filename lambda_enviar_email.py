@@ -16,8 +16,8 @@ def lambda_handler(event, context):
     
     # Variables de entorno
     PEDIDO_TABLE = os.environ.get('PEDIDO_TABLE')
-    GMAIL_USER = os.environ.get('GMAIL_USER')
-    GMAIL_PASSWORD = os.environ.get('GMAIL_PASSWORD')
+    SMTP_USER = os.environ.get('SMTP_USER', 'alessandro.monzon@utec.edu.pe')
+    SMTP_PASSWORD = os.environ.get('SMTP_PASSWORD', 'zojq bzqg wogm bsyd')
     
     if not PEDIDO_TABLE:
         print("[Error] Falta variable de entorno PEDIDO_TABLE")
@@ -68,8 +68,8 @@ def lambda_handler(event, context):
                 cliente_nombre=cliente_nombre,
                 uuid_pedido=uuid_pedido,
                 total_pedido=total,
-                smtp_user=GMAIL_USER,
-                smtp_password=GMAIL_PASSWORD
+                smtp_user=SMTP_USER,
+                smtp_password=SMTP_PASSWORD
             )
             
             print(f"[Success] Email enviado a: {cliente_email}")
@@ -212,8 +212,8 @@ def enviar_email_confirmacion(cliente_email, cliente_nombre, uuid_pedido, total_
     msg['To'] = cliente_email
     msg['Subject'] = subject
     
-    # Adjuntar HTML
-    msg.attach(MIMEText(html_body, 'html'))
+    # Adjuntar HTML con codificación UTF-8
+    msg.attach(MIMEText(html_body, 'html', 'utf-8'))
     
     # Configuración SMTP
     smtp_server = 'smtp.gmail.com'
