@@ -24,6 +24,16 @@ provider:
     # Esto inyectará la URL de la cola creada abajo en las variables de entorno
     SQS_QUEUE_URL: { Ref: YAPAGADOSQueue }
 
+package:
+  patterns:
+    - '!node_modules/**'       # Ignorar carpeta de node
+    - '!.serverless/**'        # Ignorar carpeta oculta de despliegue
+    - '!venv/**'               # Ignorar entorno virtual (si tienes uno)
+    - '!__pycache__/**'        # Ignorar archivos compilados de python
+    - '!package-lock.json'
+    - ./** # Incluir todo lo demás (tu código + librerías instaladas)
+
+
 custom:
   pedidoTable: Pedidos
   connectionsTable: Connections
