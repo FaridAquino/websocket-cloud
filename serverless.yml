@@ -90,13 +90,15 @@ functions:
     handler: lambda_generar_recibo.lambda_handler
     events:
       - sns:
-          topicName: pedidos-pagados-${self:provider.stage}
+          arn:
+            Ref: PedidosPagadosTopic
 
   enviarEmail:
     handler: lambda_enviar_email.lambda_handler
     events:
       - sns:
-          topicName: pedidos-pagados-${self:provider.stage}
+          arn:
+            Ref: PedidosPagadosTopic
 
 resources:
   Resources:
