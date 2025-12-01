@@ -374,6 +374,7 @@ def pagarPedido(event, context):
                         item_db["preference_id"] = preference_id
                         item_db["fecha_creacion"] = datetime.now(timezone.utc).isoformat()
                         item_db["uuid"] = str(uuid_val)
+                        item_db["precio_total"] = Decimal(str(total_a_cobrar))
 
                         table.put_item(Item=item_db)
                         print(f"Pedido guardado en DynamoDB (PENDIENTE_PAGO): {str(uuid_val)}")
